@@ -2,6 +2,8 @@
 // HW1 DeviceQuery
 // nvcc DeviceQuery.cu -o DeviceQuery
 
+// Some bulls*** here....
+
 #include <stdio.h>
 
 int main (void) {
