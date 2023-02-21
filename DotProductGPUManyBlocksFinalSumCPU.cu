@@ -84,22 +84,13 @@ __global__ void DotProductGPU(float *a, float *b, float *c, int n)
     {
         c[vectorNumber] = a[vectorNumber] * b[vectorNumber];
     }
-	// __syncthreads();
-
-    // In previous code, we started out with a fold the size of the vector.
-	// Because we are only operating within our block, we set fold equal to
-	// the block size.
-	// If we are on the last block, make sure we don't do like normal.
-	int fold;
-	if (blockIdx.x == blockDim.x - 1)
+	__syncthreads();
+   
+	int fold = blockDim.x;
+	if (blockIdx.x == gridDim.x - 1) // if we are in the last block
 	{
-		// In this case, when we get to thread with threadNumber 65000 or higher, 
-		// we only set fold to max value. In this case, for threadNumber 65000, we
-		// jump 349 higher, which is very last index, and thats our fold.
-		fold = N - threadNumber - 1;
-	}
-	else {
-    	fold = blockDim.x;
+		fold = N - (blockIdx.x * blockDim.x);
+		// printf("Fold = %d\n", fold);
 	}
     while (fold / 2 >= 1) // If fold == 2, we run one last time.
     {
@@ -118,13 +109,12 @@ __global__ void DotProductGPU(float *a, float *b, float *c, int n)
 		__syncthreads();
         // So we don't add with indices that we don't need.
         if (threadNumber < fold / 2)
-        {
-            c[vectorNumber] += c[vectorNumber + fold/2];
+        {	
+			c[vectorNumber] += c[vectorNumber + fold/2];
         }
 		fold /= 2;
         __syncthreads();   
     }
-
 }
 
 int main()
