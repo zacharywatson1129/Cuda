@@ -1,5 +1,7 @@
 // nvcc DotProductGPUManyBlocksFinalSumCPU.cu -o temp
 
+// NOTE to grader (Avery or Dr. Wyatt), I updated my code so it will run.
+
 #include <sys/time.h>
 #include <stdio.h>
 #include "./MyCuda.h"
