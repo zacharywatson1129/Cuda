@@ -1,4 +1,4 @@
-//nvcc RayTracer.cu -o RayTracer -lglut -lGL -lm
+//nvcc RayTracerGPU.cu -o RayTracerGPU -lglut -lGL -lm
 
 #include <GL/glut.h>
 #include <stdlib.h>
@@ -17,7 +17,6 @@
 #define ZMAX 1.0f
 
 #define NUMSPHERES 20
-#define INF 1000000
 
 struct sphereStruct 
 {
@@ -32,7 +31,8 @@ unsigned int WindowHeight = WINDOWHEIGHT;
 
 dim3 BlockSize, GridSize;
 float *PixelsCPU, *PixelsGPU; 
-sphereStruct *SpheresCPU, *SpheresGPU;
+sphereStruct *SpheresCPU;
+__constant__ sphereStruct SpheresGPU[NUMSPHERES];
 
 // prototyping functions
 void Display();
@@ -44,7 +44,6 @@ void makeRandomSpheres();
 void makeBitMap();
 void paintScreen();
 void setup();
-
 cudaEvent_t start;
 cudaEvent_t stop;
 
@@ -63,32 +62,30 @@ void KeyPressed(unsigned char key, int x, int y)
 	}
 }
 
-__device__ float hit(float pixx, float pixy, float *dimingValue, float centerx, float centery, float centerz, float radius)
+__device__ float hit(float pixelx, float pixely, float *dimingValue, sphereStruct sphere)
 {
-	float dx = pixx - centerx;  //Distance from ray to sphere center in x direction
-	float dy = pixy - centery;  //Distance from ray to sphere center in y direction
-	if(dx*dx + dy*dy < radius*radius) // if the ray hits the sphere, then we need to find distance
+	float dx = pixelx - sphere.x;  //Distance from ray to sphere center in x direction
+	float dy = pixely - sphere.y;  //Distance from ray to sphere center in y direction
+	float r2 = sphere.radius*sphere.radius;
+	if(dx*dx + dy*dy < r2) // if the ray hits the sphere, then we need to find distance
 	{
-		float dz = sqrtf(radius*radius - dx*dx - dy*dy); // Distance from ray to edge of sphere?
-		*dimingValue = dz/radius; // n is value between 0 and 1 used for darkening points near edge.
-		return dz + centerz; //  Return the distance to be scaled by
+		float dz = sqrtf(r2 - dx*dx - dy*dy); // Distance from ray to edge of sphere?
+		*dimingValue = dz/sphere.radius; // n is value between 0 and 1 used for darkening points near edge.
+		return dz + sphere.z; //  Return the distance to be scaled by
 	}
 	return (ZMIN- 1.0); //If the ray doesn't hit anything return a number behind the box.
 }
 
-__global__ void makeSphersBitMap(float *pixels, sphereStruct *sphereInfo)
+__global__ void makeSphersBitMap(float *pixels)
 {
 	float stepSizeX = (XMAX - XMIN)/((float)WINDOWWIDTH - 1);
 	float stepSizeY = (YMAX - YMIN)/((float)WINDOWHEIGHT - 1);
 	
 	// Asigning each thread a pixel
-	// Block 0's threads will do work on row 0 of the screen,
-	// Block 1's threads will do work on row 1 of the screen,
-	// so on and so forth. 
-	float picx = XMIN + threadIdx.x*stepSizeX;
-	float picy = YMIN + blockIdx.x*stepSizeY;
+	float pixelx = XMIN + threadIdx.x*stepSizeX;
+	float pixely = YMIN + blockIdx.x*stepSizeY;
 	
-	// Finding this pixel's location in memory
+	// Finding this pixels location in memory
 	int id = 3*(threadIdx.x + blockIdx.x*blockDim.x);
 	
 	//initialize rgb values for each pixel to zero (black)
@@ -97,17 +94,18 @@ __global__ void makeSphersBitMap(float *pixels, sphereStruct *sphereInfo)
 	float pixelb = 0.0f;
 	float hitValue;
 	float dimingValue;
-	float maxHit = ZMIN - 1.0f; // Initializing it to be out of the back of the box.
+	float maxHit = ZMIN -1.0f; // Initializing it to be out of the back of the box.
 	for(int i = 0; i < NUMSPHERES; i++)
 	{
-		hitValue = hit(picx, picy, &dimingValue, sphereInfo[i].x, sphereInfo[i].y, sphereInfo[i].z, sphereInfo[i].radius); 
+		//hitValue = hit(pixelx, pixely, &dimingValue, sphereInfo[i].x, sphereInfo[i].y, sphereInfo[i].z, sphereInfo[i].radius); 
+		hitValue = hit(pixelx, pixely, &dimingValue, SpheresGPU[i]);
 		// do we hit any spheres? If so, how close are we to the center? (i.e. n)
 		if(maxHit < hitValue)
 		{
 			// Setting the RGB value of the sphere but also diming it as it gets close to the side of the sphere.
-			pixelr = sphereInfo[i].r * dimingValue; 	
-			pixelg = sphereInfo[i].g * dimingValue;	
-			pixelb = sphereInfo[i].b * dimingValue; 	
+			pixelr = SpheresGPU[i].r * dimingValue; 	
+			pixelg = SpheresGPU[i].g * dimingValue;	
+			pixelb = SpheresGPU[i].b * dimingValue; 	
 			maxHit = hitValue; // reset maxHit value to be the current closest sphere
 		}
 	}
@@ -137,15 +135,13 @@ void makeRandomSpheres()
 
 void makeBitMap()
 {
-	cudaMemcpy(SpheresGPU, SpheresCPU, NUMSPHERES*sizeof(sphereStruct), cudaMemcpyHostToDevice);
-	myCudaErrorCheck(__FILE__, __LINE__);
-	
+	//cudaMemcpy(SpheresGPU, SpheresCPU, NUMSPHERES*sizeof(sphereStruct), cudaMemcpyHostToDevice);
+	//myCudaErrorCheck(__FILE__, __LINE__);
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start, 0);
-	makeSphersBitMap<<<GridSize, BlockSize>>>(PixelsGPU, SpheresGPU);
+	makeSphersBitMap<<<GridSize, BlockSize>>>(PixelsGPU);
 	myCudaErrorCheck(__FILE__, __LINE__);
-	
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
 	float elapsedTime;
@@ -153,7 +149,6 @@ void makeBitMap()
 	printf("Time to generate: %3.1f ms\n", elapsedTime);
 	cudaEventDestroy(start);
 	cudaEventDestroy(stop);
-	
 	cudaMemcpyAsync(PixelsCPU, PixelsGPU, WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float), cudaMemcpyDeviceToHost);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
@@ -172,10 +167,10 @@ void setup()
 	//We need the 3 because each pixel has a red, green, and blue value.
 	PixelsCPU = (float *)malloc(WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float));
 	cudaMalloc(&PixelsGPU,WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float));
-	myCudaErrorCheck(__FILE__, __LINE__);
+	//myCudaErrorCheck(__FILE__, __LINE__);
 	
-	SpheresCPU= (sphereStruct*)malloc(NUMSPHERES*sizeof(sphereStruct));
-	cudaMalloc(&SpheresGPU, NUMSPHERES*sizeof(sphereStruct));
+	SpheresCPU = (sphereStruct*)malloc(NUMSPHERES*sizeof(sphereStruct));
+	// cudaMalloc(&SpheresGPU, NUMSPHERES*sizeof(sphereStruct));
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
 	//Threads in a block
@@ -201,9 +196,11 @@ void setup()
 }
 
 int main(int argc, char** argv)
-{ 
+{	
 	setup();
 	makeRandomSpheres();
+	cudaMemcpyToSymbol(SpheresGPU, SpheresCPU, sizeof(sphereStruct) * NUMSPHERES);
+	myCudaErrorCheck(__FILE__, __LINE__);
    	glutInit(&argc, argv);
 	glutInitDisplayMode(GLUT_RGB | GLUT_SINGLE);
    	glutInitWindowSize(WINDOWWIDTH, WINDOWHEIGHT);
@@ -215,3 +212,5 @@ int main(int argc, char** argv)
 	//glutIdleFunc(idle);
    	glutMainLoop();
 }
+
+
