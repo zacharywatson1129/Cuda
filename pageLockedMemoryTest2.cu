@@ -116,6 +116,8 @@ int main()
 	cudaEventElapsedTime(&timeEvent, StartEvent, StopEvent);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	printf("\n Time on GPU using pageable memory up = %3.1f milliseconds", timeEvent);
+
+    float pageableTime = timeEvent;
 	
 	cudaEventRecord(StartEvent, 0);
 	myCudaErrorCheck(__FILE__, __LINE__);
@@ -127,7 +129,12 @@ int main()
 	cudaEventElapsedTime(&timeEvent, StartEvent, StopEvent);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	printf("\n Time on GPU using page locked memory up = %3.1f milliseconds", timeEvent);
-	
+
+    if (pageableTime > timeEvent)
+    {
+        printf("\n\n Difference in time = %3.1f milliseconds or %.1f%% faster sending page locked memory up\n", 
+            pageableTime-timeEvent, (pageableTime-timeEvent)/pageableTime*100);
+    }
 	cudaEventRecord(StartEvent, 0);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	copyPageableMemoryDown();
@@ -138,6 +145,7 @@ int main()
 	cudaEventElapsedTime(&timeEvent, StartEvent, StopEvent);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	printf("\n Time on GPU using pageable memory down = %3.1f milliseconds", timeEvent);
+    pageableTime = timeEvent;
 	
 	cudaEventRecord(StartEvent, 0);
 	myCudaErrorCheck(__FILE__, __LINE__);
@@ -149,6 +157,13 @@ int main()
 	cudaEventElapsedTime(&timeEvent, StartEvent, StopEvent);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	printf("\n Time on GPU using page locked memory down = %3.1f milliseconds", timeEvent);
+    
+
+    if (pageableTime > timeEvent)
+    {
+        printf("\n\n Difference in time = %3.1f milliseconds or %.1f%% faster sending page locked memory down\n", 
+            pageableTime-timeEvent, (pageableTime-timeEvent)/pageableTime*100);
+    }
 	
 	printf("\n");
 	//You're done so cleanup your mess.
