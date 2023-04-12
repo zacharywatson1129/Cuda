@@ -17,7 +17,7 @@
 #define XWindowSize 1000
 #define YWindowSize 1000
 
-#define DRAW 10
+#define DRAW 1000
 #define DAMP 0.5
 
 #define DT 0.001
@@ -33,7 +33,7 @@
 float4 Position[N], Velocity[N], Force[N];
 float4 *PositionGPU, *VelocityGPU, *ForceGPU;
 dim3 Block, Grid;
-cudaStream_t Stream0, Stream1;//,Stream2;
+cudaStream_t Stream0, Stream1;
 
 
 void set_initail_conditions()
@@ -92,14 +92,12 @@ void setupDevice()
 
     cudaStreamCreateWithFlags(&Stream0, cudaStreamNonBlocking);
 	cudaStreamCreateWithFlags(&Stream1, cudaStreamNonBlocking);
-	//cudaStreamCreate(&Stream2);
 }
 
 void DestroyStreams ()
 {
     cudaStreamDestroy(Stream0);
 	cudaStreamDestroy(Stream1);
-   // cudaStreamDestroy(Stream2);
 }
 
 void draw_picture()
@@ -163,28 +161,27 @@ __global__ void getForces(float4 *pos, float4 *vel, float4 * force)
 	#pragma unroll 32
 	for(int j=0; j < gridDim.x; j++)
 	{
-	shPos[threadIdx.x] = pos[threadIdx.x + blockDim.x*j];
-	//shPos[threadIdx.x] = pos[id];
-    __syncthreads();
+		shPos[threadIdx.x] = pos[threadIdx.x + blockDim.x*j];
+		__syncthreads();
 
-	#pragma unroll 32
-	for(int i=0; i < blockDim.x; i++)	
-	    {
-		ii = i + blockDim.x*blockIdx.x;
-		    if(ii != id && ii < N) 
-		    {
-		    force_mag = getBodyBodyForce(posMe, shPos[i]);
-			forceSum.x += force_mag.x;
-			forceSum.y += force_mag.y;
-			forceSum.z += force_mag.z;
-		    }
-	   	 }
+		#pragma unroll 32
+		for(int i=0; i < blockDim.x; i++)	
+		{
+			ii = i + blockDim.x*blockIdx.x;
+			if(ii != id && ii < N) 
+			{
+				force_mag = getBodyBodyForce(posMe, shPos[i]);
+				forceSum.x += force_mag.x;
+				forceSum.y += force_mag.y;
+				forceSum.z += force_mag.z;
+			}
+		}
 	}
 	if(id <N)
 	{
-	    force[id].x = forceSum.x;
-	    force[id].y = forceSum.y;
-	    force[id].z = forceSum.z;
+		force[id].x = forceSum.x;
+		force[id].y = forceSum.y;
+		force[id].z = forceSum.z;
 	}
 }
 
@@ -217,14 +214,14 @@ void n_body()
 	int   tdraw = 0; 
 	float time = 0.0;
 	
-    	cudaMemcpy( PositionGPU, Position, N *sizeof(float4), cudaMemcpyHostToDevice );
-    	cudaStreamSynchronize(Stream0);
-    	cudaMemcpy( VelocityGPU, Velocity, N *sizeof(float4), cudaMemcpyHostToDevice );
+    cudaMemcpy( PositionGPU, Position, N *sizeof(float4), cudaMemcpyHostToDevice );	
+    cudaMemcpy( VelocityGPU, Velocity, N *sizeof(float4), cudaMemcpyHostToDevice );
+    
 	while(time < STOP_TIME)
 	{	
 		getForces<<<Grid, Block, 0, Stream0>>>(PositionGPU, VelocityGPU, ForceGPU);
-        	moveBodies<<<Grid, Block, 0, Stream1>>>(time, PositionGPU, VelocityGPU, ForceGPU);
-        
+        moveBodies<<<Grid, Block, 0, Stream1>>>(time, PositionGPU, VelocityGPU, ForceGPU);
+
 		if(tdraw == DRAW) 
 		{
 			cudaMemcpy( Position, PositionGPU, N *sizeof(float4), cudaMemcpyDeviceToHost );
@@ -235,8 +232,6 @@ void n_body()
 		time += DT;
 		tdraw++;
 	}
-	cudaStreamSynchronize(Stream1);
-   // cudaStreamSynchronize(Stream2);
 }
 
 void control()
