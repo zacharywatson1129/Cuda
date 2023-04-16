@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 
-#define BLOCK_SIZE 256
+#define BLOCK_SIZE 32
 
 #define N 8000
 
@@ -33,7 +33,7 @@
 float4 Position[N], Velocity[N], Force[N];
 float4 *PositionGPU, *VelocityGPU, *ForceGPU;
 dim3 Block, Grid;
-cudaStream_t Stream0, Stream1;
+cudaStream_t Stream0, Stream1;//,Stream2;
 
 
 void set_initail_conditions()
@@ -42,6 +42,7 @@ void set_initail_conditions()
 	float position_start, temp;
 	float initail_seperation;
 
+	// Note: can be replaced with cube root to speed up slightly.
 	temp = pow((float)N,1.0/3.0) + 0.99999;
 	particles_per_side = temp;
     position_start = -(particles_per_side -1.0)/2.0;
@@ -94,7 +95,7 @@ void setupDevice()
 	cudaStreamCreateWithFlags(&Stream1, cudaStreamNonBlocking);
 }
 
-void DestroyStreams ()
+void DestroyStreams()
 {
     cudaStreamDestroy(Stream0);
 	cudaStreamDestroy(Stream1);
@@ -109,7 +110,7 @@ void draw_picture()
 
 	glColor3d(1.0,1.0,0.5);
 
-	#pragma unroll 32
+	#pragma unroll N
 	for(i=0; i<N; i++)
 	{
 		glPushMatrix();
@@ -130,7 +131,7 @@ __device__ float4 getBodyBodyForce(float4 p0, float4 p1)
 	float r2 = dx*dx + dy*dy + dz*dz;
 	float r = sqrt(r2);
 
-	// float force  = (G*p0.w*p1.w)/(r2) - (H*p0.w*p1.w)/(r2*r2);
+	//float force  = (G*p0.w*p1.w)/(r2) - (H*p0.w*p1.w)/(r2*r2);
 	float force  = ((p0.w*p1.w)/r2)*(G - (H/r2));
 
 	f.x = force*dx/r;
@@ -158,30 +159,29 @@ __global__ void getForces(float4 *pos, float4 *vel, float4 * force)
 	posMe.z = pos[id].z;
 	posMe.w = pos[id].w;
 	
-	#pragma unroll 32
+	#pragma unroll 256
 	for(int j=0; j < gridDim.x; j++)
 	{
 		shPos[threadIdx.x] = pos[threadIdx.x + blockDim.x*j];
-		__syncthreads();
-
+    	__syncthreads();
 		#pragma unroll 32
 		for(int i=0; i < blockDim.x; i++)	
 		{
 			ii = i + blockDim.x*blockIdx.x;
 			if(ii != id && ii < N) 
 			{
-				force_mag = getBodyBodyForce(posMe, shPos[i]);
+		    	force_mag = getBodyBodyForce(posMe, shPos[i]);
 				forceSum.x += force_mag.x;
 				forceSum.y += force_mag.y;
 				forceSum.z += force_mag.z;
-			}
-		}
+		    }
+	   	}
 	}
-	if(id <N)
+	if(id < N)
 	{
-		force[id].x = forceSum.x;
-		force[id].y = forceSum.y;
-		force[id].z = forceSum.z;
+	    force[id].x = forceSum.x;
+	    force[id].y = forceSum.y;
+	    force[id].z = forceSum.z;
 	}
 }
 
@@ -214,14 +214,13 @@ void n_body()
 	int   tdraw = 0; 
 	float time = 0.0;
 	
-    cudaMemcpy( PositionGPU, Position, N *sizeof(float4), cudaMemcpyHostToDevice );	
+    cudaMemcpy( PositionGPU, Position, N *sizeof(float4), cudaMemcpyHostToDevice );
     cudaMemcpy( VelocityGPU, Velocity, N *sizeof(float4), cudaMemcpyHostToDevice );
-    
 	while(time < STOP_TIME)
 	{	
 		getForces<<<Grid, Block, 0, Stream0>>>(PositionGPU, VelocityGPU, ForceGPU);
         moveBodies<<<Grid, Block, 0, Stream1>>>(time, PositionGPU, VelocityGPU, ForceGPU);
-
+        
 		if(tdraw == DRAW) 
 		{
 			cudaMemcpy( Position, PositionGPU, N *sizeof(float4), cudaMemcpyDeviceToHost );
@@ -239,13 +238,15 @@ void control()
 	timeval start, end;
 	double totalRunTime;
 	
+	// printf("\n Speed......I am Speed.... (Lightning McQueen) \n");
+	
 	set_initail_conditions();
 	setupDevice();
 	draw_picture();
 	
 	gettimeofday(&start, NULL);
-    	n_body();
-    	gettimeofday(&end, NULL);
+    n_body();
+    gettimeofday(&end, NULL);
     	
 	totalRunTime = (end.tv_sec * 1000000.0 + end.tv_usec) - (start.tv_sec * 1000000.0 + start.tv_usec);
 	printf("\n Total run time = %5.15f seconds\n", (totalRunTime/1000000.0));
