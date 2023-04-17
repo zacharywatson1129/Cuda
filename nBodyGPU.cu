@@ -1,6 +1,6 @@
 //Optimized using shared memory and on chip memory	
 //Initail conditions are setup in a cube.																																											
-// nvcc nBodyGPU.cu -o nBodyGPU -lglut -lm -lGLU -lGL
+// nvcc -Xptxas -O3 -v --use_fast_math nBodyGPU.cu -o nBodyGPU -lglut -lm -lGLU -lGL
 //To stop hit "control c" in the window you launched it from.
 
 #include <sys/time.h>
@@ -33,7 +33,7 @@
 float4 Position[N], Velocity[N], Force[N];
 float4 *PositionGPU, *VelocityGPU, *ForceGPU;
 dim3 Block, Grid;
-cudaStream_t Stream0, Stream1;//,Stream2;
+cudaStream_t Stream0, Stream1;
 
 
 void set_initail_conditions()
@@ -43,9 +43,12 @@ void set_initail_conditions()
 	float initail_seperation;
 
 	// Note: can be replaced with cube root to speed up slightly.
-	temp = pow((float)N,1.0/3.0) + 0.99999;
-	particles_per_side = temp;
-    position_start = -(particles_per_side -1.0)/2.0;
+	//temp = pow((float)N,1.0/3.0) + 0.99999;
+
+	// printf("temp = %f\n\n", temp);
+	printf("\nThanks to Aurod for determining that cube root is faster than pow(1/3).\n");
+	particles_per_side = cbrt((float)N) + 0.99999;
+    position_start = -(particles_per_side -1.0)*0.5;
 	initail_seperation = 2.0;
 	
 	#pragma unroll N
@@ -134,9 +137,9 @@ __device__ float4 getBodyBodyForce(float4 p0, float4 p1)
 	//float force  = (G*p0.w*p1.w)/(r2) - (H*p0.w*p1.w)/(r2*r2);
 	float force  = ((p0.w*p1.w)/r2)*(G - (H/r2));
 
-	f.x = force*dx/r;
-	f.y = force*dy/r;
-	f.z = force*dz/r;
+	f.x = force*dx/r; // Equivalent of force*(p1.x - p0.x)
+	f.y = force*dy/r; // Equivalent of force*(p1.y - p0.y)
+	f.z = force*dz/r; // Equivalent of force*(p1.z - p0.z)
 
 	return(f);
 }
@@ -159,7 +162,7 @@ __global__ void getForces(float4 *pos, float4 *vel, float4 * force)
 	posMe.z = pos[id].z;
 	posMe.w = pos[id].w;
 	
-	#pragma unroll 256
+	#pragma unroll
 	for(int j=0; j < gridDim.x; j++)
 	{
 		shPos[threadIdx.x] = pos[threadIdx.x + blockDim.x*j];
@@ -238,7 +241,7 @@ void control()
 	timeval start, end;
 	double totalRunTime;
 	
-	// printf("\n Speed......I am Speed.... (Lightning McQueen) \n");
+	printf("\n Speed......I am Speed.... (Lightning McQueen) \n");
 	
 	set_initail_conditions();
 	setupDevice();
@@ -308,4 +311,5 @@ int main(int argc, char** argv)
 	glutMainLoop();
 	return 0;
 }
+
 
